@@ -90,6 +90,12 @@ export interface OHLCV {
   volume: number
 }
 
+export interface AppStatus {
+  robinhood: boolean
+  anthropic: boolean
+  telegram: boolean
+}
+
 export const fetchSignals = () => api.get<Signal[]>('/signals').then(r => r.data)
 export const fetchSignal = (symbol: string) => api.get<Signal>(`/signals/${symbol}`).then(r => r.data)
 export const fetchPortfolio = () => api.get<Position[]>('/portfolio').then(r => r.data)
@@ -98,4 +104,9 @@ export const fetchChart = (symbol: string, interval = '5minute', span = 'day') =
   api.get<OHLCV[]>(`/chart/${symbol}`, { params: { interval, span } }).then(r => r.data)
 export const fetchNews = (symbol: string) =>
   api.get<{ title: string; link: string; sentiment_label: string }[]>(`/news/${symbol}`).then(r => r.data)
-export const triggerScan = () => api.post('/scan').then(r => r.data)
+export const fetchStatus = () => api.get<AppStatus>('/status').then(r => r.data)
+export const triggerScan = () =>
+  api.post('/scan').then(r => r.data).catch(err => {
+    const msg = err?.response?.data?.detail ?? 'Scan failed'
+    throw new Error(msg)
+  })

@@ -1,4 +1,5 @@
 import logging
+import os
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
@@ -22,10 +23,14 @@ logger = logging.getLogger(__name__)
 
 # In-memory cache for latest signals
 _signal_cache: list[dict] = []
+_rh_configured = False
 
 
 def _run_signal_scan():
     global _signal_cache
+    if not _rh_configured:
+        logger.warning("Scan skipped — Robinhood credentials not configured. Add RH_EMAIL/RH_PASSWORD to .env and restart.")
+        return
     logger.info("Running signal scan...")
     try:
         symbols = get_watchlist()
@@ -77,11 +82,20 @@ def _analyze_symbol(symbol: str) -> dict:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    login()
+    global _rh_configured
+    try:
+        login()
+        _rh_configured = True
+    except KeyError as e:
+        logger.warning(f"Robinhood credentials not set ({e}). Add credentials to .env and restart.")
+        _rh_configured = False
     sched.start(_run_signal_scan, _run_digest)
     yield
     sched.stop()
-    logout()
+    try:
+        logout()
+    except Exception:
+        pass
 
 
 app = FastAPI(title="Rihal Trading Advisor", version="1.0.0", lifespan=lifespan)
@@ -98,6 +112,15 @@ app.add_middleware(
 @app.get("/api/health")
 def health():
     return {"status": "ok"}
+
+
+@app.get("/api/status")
+def status():
+    return {
+        "robinhood": _rh_configured,
+        "anthropic": bool(os.getenv("ANTHROPIC_API_KEY")),
+        "telegram": bool(os.getenv("TELEGRAM_TOKEN")),
+    }
 
 
 @app.get("/api/account")
@@ -146,6 +169,11 @@ def signal_for_symbol(symbol: str, background_tasks: BackgroundTasks):
 
 @app.post("/api/scan")
 def trigger_scan(background_tasks: BackgroundTasks):
+    if not _rh_configured:
+        raise HTTPException(
+            status_code=503,
+            detail="Robinhood credentials not configured. Add RH_EMAIL and RH_PASSWORD to your .env file and restart the backend."
+        )
     background_tasks.add_task(_run_signal_scan)
     return {"status": "scan triggered"}
 
